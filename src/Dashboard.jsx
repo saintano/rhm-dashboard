@@ -470,6 +470,11 @@ export default function Dashboard() {
     const extra = isDragging ? 8 : 2;
     return Math.max(30, ...state.resources.map(r => columnEndWeek(r) + extra));
   }, [state, isDragging]);
+  // Реальная длина проекта — максимум, на котором кончается самый длинный ресурс (без технических запасов)
+  const projectWeeks = useMemo(
+    () => Math.max(0, ...state.resources.map(r => columnEndWeek(r))),
+    [state]
+  );
   const totalManWeeks = useMemo(() => state.resources.reduce((s, r) => s + columnManWeeks(r), 0), [state]);
   const totalTasks = useMemo(() => state.resources.reduce((s, r) => s + r.blocks.filter(b => b.kind === "task").length, 0), [state]);
   const currWeek = currentWeekIndex();
@@ -523,7 +528,7 @@ export default function Dashboard() {
           <div><b>Ресурсов:</b> {state.resources.length}</div>
           <div><b>Задач:</b> {totalTasks}</div>
           <div><b>Суммарно ч/н:</b> {totalManWeeks}</div>
-          <div><b>Длина проекта:</b> {maxWeeks} нед. (~{Math.ceil(maxWeeks / 4.33)} мес.)</div>
+          <div><b>Длина проекта:</b> {projectWeeks} нед. (~{Math.ceil(projectWeeks / 4.33)} мес.)</div>
           <div><b>Текущая неделя:</b> {currWeek >= 0 ? `#${((START_WEEK + currWeek - 1) % 52) + 1}` : "до старта"}</div>
         </div>
       )}
