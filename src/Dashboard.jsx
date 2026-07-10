@@ -650,6 +650,7 @@ function WeekScale({ maxWeeks, currWeek, zoom = 1 }) {
         return (
           <div key={i} style={{
             height: WEEK_PX,
+            boxSizing: "border-box",
             display: "flex", flexDirection: "column", justifyContent: "center",
             borderLeft: isCurr ? `3px solid ${CURRENT_WEEK_COLOR}` : "1px solid #ddd",
             borderTop: i === 0 ? "none" : "1px solid rgba(0,0,0,0.06)",
