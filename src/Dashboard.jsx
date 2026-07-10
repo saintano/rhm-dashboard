@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Plus, Trash2, Download, Upload, HelpCircle, ChevronDown, ChevronUp, X, RotateCcw, RotateCw, MoreVertical, RefreshCw } from "lucide-react";
 
+// ===== Версия данных =====
+// Увеличивай это число при каждом обновлении, пока идёт тестирование —
+// у всех пользователей автоматически подставится чистое состояние без ручной чистки кэша.
+// Когда дашбордом начнут пользоваться по-настоящему (в проде) — перестань менять это число,
+// иначе реальные рабочие данные людей будут стираться при каждом обновлении кода.
+const APP_VERSION = 4;
+const STORAGE_KEY = `dashboard-state-v${APP_VERSION}`;
+
 // ===== Константы =====
 const WEEK_PX = 60;         // высота одной недели в сетке (сплошная, без внешнего зазора)
 const STEP_PX = WEEK_PX;    // шаг сетки = высоте недели
@@ -87,7 +95,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("dashboard-state-v3");
+      const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.resources) setState(parsed);
@@ -97,7 +105,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      try { localStorage.setItem("dashboard-state-v3", JSON.stringify(state)); } catch {}
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
     }, 400);
     return () => clearTimeout(t);
   }, [state]);
