@@ -39,70 +39,11 @@ function currentWeekIndex() { return Math.floor((new Date() - START_DATE) / (100
 // ===== Исходные данные =====
 const INITIAL_STATE = {
   resources: [
-    {
-      id: "r1", name: "Артём Фетисов", color: HEADER_COLORS[0], blocks: [
-        { id: uid(), kind: "task", num: "5", title: "API Gateway", desc: "Шлюз + отдельный сервис по АПИ", weeks: 3, color: "#FFA7FF", weekStart: 12 },
-        { id: uid(), kind: "task", num: "5", title: "Битрикс Монолит 1", desc: "Агрегирующий слой между фронтом и беком", weeks: 4, color: "#FFA7FF", weekStart: 15 },
-      ]
-    },
-    {
-      id: "r2", name: "Женя Плеханов", color: HEADER_COLORS[1], blocks: [
-        { id: uid(), kind: "task", num: "4", title: "ОЗЮЛ", desc: "Оформление заказа юрлицами версия для МП", weeks: 4, color: "#FFA7FF", weekStart: 2 },
-        { id: uid(), kind: "vacation", title: "Отпуск", weeks: 1, weekStart: 6 },
-        { id: uid(), kind: "task", num: "1", title: "Distributor NEW", desc: "Сервис дистрибьюторов. Принимает, обрабатывает и выдает другим сервисам информацию", weeks: 4, color: "#FF8C8C", weekStart: 7 },
-        { id: uid(), kind: "task", num: "1", title: "Stock NEW", desc: "Сервис остатков. Принимает, обрабатывает и выдаёт другим сервисам информацию об остатках и складах", weeks: 4, color: "#FF8C8C", weekStart: 11 },
-        { id: uid(), kind: "vacation", title: "Отпуск", weeks: 2, weekStart: 15 },
-        { id: uid(), kind: "task", num: "2", title: "Price Service", desc: "Сервис цен, принимает запросы для расчёта стоимостей с разными скидками, вплоть до расчёта по каждому пользователю", weeks: 4, color: "#D5D7FF", weekStart: 17 },
-        { id: uid(), kind: "task", num: "2", title: "Delivery", desc: "Сервис доставки, принимает запросы для расчёта сроков и стоимостей доставки в разных ТК по своим правилам", weeks: 4, color: "#D5D7FF", weekStart: 21 },
-      ]
-    },
-    {
-      id: "r3", name: "Андрей Звендинов", color: HEADER_COLORS[2], blocks: [
-        { id: uid(), kind: "task", num: "4", title: "Basket", desc: "Сервис корзины. Объединение корзины между приложениями и веб, поддержка разных сущностей внутри (товары разных дистров, в будущем товаров с витрины по бренд-баллам)", weeks: 4, color: "#FFA7FF", weekStart: 0 },
-        { id: uid(), kind: "task", num: "1", title: "Cluster NEW", desc: "Сервис кластеризации. Принимает, обрабатывает и выдает другим сервисам информацию о кластерах", weeks: 4, color: "#FF8C8C", weekStart: 5 },
-        { id: uid(), kind: "task", num: "1", title: "ElasticSearch", desc: "Новое хранилище под товары, бренды и разделы", weeks: 4, color: "#FF8C8C", weekStart: 10 },
-        { id: uid(), kind: "task", num: "2", title: "Price discount", desc: "Сервис создания скидок для цен, создает скидки (ПЗП и тд), следит за активностями и изменениями. Выгружает инфо в Price service для дальнейшей обработки, а также в Битрикс", weeks: 4, color: "#D5D7FF", weekStart: 14 },
-        { id: uid(), kind: "task", num: "5", title: "Чеки", desc: "Хранение данных о чеках, создание, изменение и тд.\n* Остаётся на Битриксе", weeks: 3, color: "#FFA7FF", weekStart: 18 },
-        { id: uid(), kind: "task", num: "5", title: "Payments", desc: "Хранение данных об оплатах, создание, изменение и итд\n* Остаётся на Битриксе", weeks: 3, color: "#FFA7FF", weekStart: 21 },
-      ]
-    },
-    {
-      id: "r4", name: "DevOps", color: HEADER_COLORS[2], blocks: [
-        { id: uid(), kind: "label", title: "Поиск человека", weeks: 3, weekStart: 0 },
-        { id: uid(), kind: "task", num: "3", title: "Оркестрация ч.1", desc: "Анализ и создание правил", weeks: 4, color: "#85BCBE", weekStart: 3 },
-        { id: uid(), kind: "task", num: "3", title: "Оркестрация ч.2", desc: "Настройка виртуальных машин", weeks: 4, color: "#85BCBE", weekStart: 7 },
-        { id: uid(), kind: "task", num: "3", title: "Оркестрация ч.3", desc: "Внедрение и сопровождение", weeks: 4, color: "#85BCBE", weekStart: 11 },
-        { id: uid(), kind: "task", num: "3", title: "Postgre Cluster", desc: "", weeks: 1, color: "#85BCBE", weekStart: 15 },
-        { id: uid(), kind: "task", num: "3", title: "Redis Cluster", desc: "", weeks: 1, color: "#85BCBE", weekStart: 16 },
-        { id: uid(), kind: "task", num: "3", title: "Rabbit MQ", desc: "", weeks: 1, color: "#85BCBE", weekStart: 17 },
-        { id: uid(), kind: "task", num: "3", title: "Gitlab / CICD", desc: "", weeks: 1, color: "#85BCBE", weekStart: 18 },
-      ]
-    },
-    {
-      id: "r5", name: "Алексей Кремлёв", color: HEADER_COLORS[3], blocks: [
-        { id: uid(), kind: "label", title: "Поиск человека", weeks: 4, weekStart: 0 },
-        { id: uid(), kind: "task", num: "4", title: "Новая панель ч.1 Back", desc: "Панель управления сайтом. Права доступа, ПА, РБ, промо, ОЗМ", weeks: 4, color: "#D7B989", weekStart: 4 },
-        { id: uid(), kind: "task", num: "4", title: "Новая панель ч.2 Back", desc: "Перенос заведения информации по промо-акциям из Битрикса в панель", weeks: 4, color: "#D7B989", weekStart: 8 },
-        { id: uid(), kind: "task", num: "2", title: "Promo code", desc: "Сервис создания и расчётов цен для применения промо кодов. Обрабатывает и рассчитывает конечную скидку на применение", weeks: 4, color: "#D5D7FF", weekStart: 13 },
-        { id: uid(), kind: "task", num: "5", title: "Checkout", desc: "Агрегирующий сервис для ОЗ. Ходит по разным сервисам для поиска информации, объединяет, заставляет пересчитывать и ходить в другие системы.\n* Остаётся на Битриксе", weeks: 3, color: "#FFA7FF", weekStart: 19 },
-        { id: uid(), kind: "task", num: "5", title: "Order", desc: "Хранение данных о заказах, создание и распределение по сущностям\n* Остаётся на Битриксе", weeks: 2, color: "#FFA7FF", weekStart: 22 },
-      ]
-    },
-    {
-      id: "r6", name: "Back Middle", color: HEADER_COLORS[4], blocks: [
-        { id: uid(), kind: "task", num: "4", title: "Новая панель ч.1 NEW", desc: "Панель управления сайтом. Права доступа для разных пользователей, управление ПА", weeks: 4, color: "#D7B989", weekStart: 2 },
-        { id: uid(), kind: "task", num: "4", title: "Новая панель ч.2", desc: "Панель управления сайтом. РБ, промо, ОЗМ", weeks: 4, color: "#D7B989", weekStart: 6 },
-        { id: uid(), kind: "task", num: "4", title: "Новая панель ч.2 Back", desc: "Перенос заведения информации по промо-акциям из Битрикса в панель", weeks: 4, color: "#D7B989", weekStart: 10 },
-        { id: uid(), kind: "label", title: "Интеграция с Web", weeks: 10, weekStart: 14 },
-      ]
-    },
-    {
-      id: "r7", name: "Сергей Мараев", color: HEADER_COLORS[5], blocks: [
-        { id: uid(), kind: "label", title: "Back для поддержки новых задач APP", weeks: 10, weekStart: 0 },
-        { id: uid(), kind: "task", num: "5", title: "Битрикс Монолит 2", desc: "Корзина, веб, акции, скидки, города", weeks: 4, color: "#FFA7FF", weekStart: 10 },
-        { id: uid(), kind: "label", title: "Back для поддержки новых задач APP", weeks: 10, weekStart: 14 },
-      ]
-    },
+    { id: "r1", name: "Артём Фетисов", color: HEADER_COLORS[0], blocks: [] },
+    { id: "r2", name: "Женя Плеханов", color: HEADER_COLORS[1], blocks: [] },
+    { id: "r3", name: "Андрей Звендинов", color: HEADER_COLORS[2], blocks: [] },
+    { id: "r5", name: "Алексей Кремлёв", color: HEADER_COLORS[3], blocks: [] },
+    { id: "r7", name: "Сергей Мараев", color: HEADER_COLORS[6], blocks: [] },
   ]
 };
 
@@ -146,7 +87,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("dashboard-state-v2");
+      const raw = localStorage.getItem("dashboard-state-v3");
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.resources) setState(parsed);
@@ -156,7 +97,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      try { localStorage.setItem("dashboard-state-v2", JSON.stringify(state)); } catch {}
+      try { localStorage.setItem("dashboard-state-v3", JSON.stringify(state)); } catch {}
     }, 400);
     return () => clearTimeout(t);
   }, [state]);
