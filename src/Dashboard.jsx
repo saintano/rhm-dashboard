@@ -622,6 +622,7 @@ function MonthRail({ maxWeeks }) {
         return (
           <div key={idx} style={{
             position: "absolute", top, left: 0, width: 66, height,
+            boxSizing: "border-box",
             background: isEven ? "#1E3A5F" : "#3A4A5F",
             color: "#fff", borderRadius: 6, padding: "10px 4px",
             fontFamily: "Georgia, serif", fontSize: 13, fontWeight: 600,
@@ -753,6 +754,7 @@ function ResourceColumn({
     <div style={{ width: COL_WIDTH, flexShrink: 0, marginRight: 14, position: "relative" }}>
       <div style={{
         height: HEADER_HEIGHT - 10, marginBottom: 10,
+        boxSizing: "border-box",
         background: resource.color, color: "#fff",
         borderRadius: 8, padding: "12px 14px",
         display: "flex", flexDirection: "column", justifyContent: "space-between", position: "relative"
