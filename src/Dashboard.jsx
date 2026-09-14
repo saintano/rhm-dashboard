@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Plus, Trash2, Download, Upload, HelpCircle, ChevronDown, ChevronUp, X, RotateCcw, RotateCw, MoreVertical, RefreshCw } from "lucide-react";
+import SnapshotsModal from "./SnapshotsModal";
+import { snapshotRequest } from "./snapshots";
+import { validateState, currentWeekIndex, isoWeek } from "../shared/dashboard.js";
+import { Save, CalendarDays, Plus, Trash2, Download, Upload, HelpCircle, ChevronDown, ChevronUp, X, RotateCcw, RotateCw, MoreVertical, RefreshCw } from "lucide-react";
 
 // ===== Версия данных =====
-// Увеличивай это число при каждом обновлении, пока идёт тестирование —
-// у всех пользователей автоматически подставится чистое состояние без ручной чистки кэша.
-// Когда дашбордом начнут пользоваться по-настоящему (в проде) — перестань менять это число,
-// иначе реальные рабочие данные людей будут стираться при каждом обновлении кода.
+// Ключ рабочих данных сохраняется между релизами.
 const APP_VERSION = 4;
 const STORAGE_KEY = `dashboard-state-v${APP_VERSION}`;
 
@@ -18,7 +18,6 @@ const MONTH_COL_WIDTH = 90;
 const WEEK_COL_WIDTH = 100;
 const HEADER_HEIGHT = 120;
 const MIN_WEEKS = 1;
-const START_WEEK = 19;
 const START_DATE = new Date(2026, 4, 4);
 
 const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -38,11 +37,11 @@ const deepClone = (x) => JSON.parse(JSON.stringify(x));
 function weekToDate(i) { const d = new Date(START_DATE); d.setDate(d.getDate() + i * 7); return d; }
 function weekLabel(i) {
   const s = weekToDate(i), e = new Date(s); e.setDate(e.getDate() + 6);
-  let num = START_WEEK + i; while (num > 52) num -= 52;
+  const num = isoWeek(s);
   const f = (d) => `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, "0")}`;
   return { num, range: `${f(s)}–${f(e)}` };
 }
-function currentWeekIndex() { return Math.floor((new Date() - START_DATE) / (1000 * 60 * 60 * 24) / 7); }
+
 
 // ===== Исходные данные =====
 const INITIAL_STATE = {
@@ -60,7 +59,22 @@ function columnManWeeks(r) { return r.blocks.filter(b => b.kind === "task").redu
 
 // ===== Root =====
 export default function Dashboard() {
-  const [state, setState] = useState(INITIAL_STATE);
+  const [state, setState] = useState(() => {
+    try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return validateState(JSON.parse(raw)); } catch {}
+    return INITIAL_STATE;
+  });
+  const [storageReady, setStorageReady] = useState(false);
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [booting, setBooting] = useState(true);
+  const timelineRef = useRef(null);
+  const [currWeek, setCurrWeek] = useState(currentWeekIndex);
+  const goToCurrentWeek = useCallback((smooth = true) => {
+    const row = timelineRef.current?.querySelector('[data-current-week="true"]');
+    if (!row) return;
+    const scroller = timelineRef.current;
+    scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 150), behavior: smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant' });
+  }, []);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
   const [selectedBlocks, setSelectedBlocks] = useState([]); // массив { resourceId, blockId }
@@ -94,23 +108,45 @@ export default function Dashboard() {
   stateRef.current = state;
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.resources) setState(parsed);
-      }
-    } catch (e) {}
+    let cancelled = false;
+    async function init() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) { validateState(JSON.parse(raw)); setStorageReady(true); setBooting(false); return; }
+      } catch { setNotice("Не удалось прочитать локальный план. Откройте сохранённый снапшот."); setBooting(false); return; }
+      try {
+        const { snapshots } = await snapshotRequest();
+        if (cancelled) return;
+        if (snapshots.length) {
+          const latest = await snapshotRequest(snapshots[0].id);
+          if (cancelled) return;
+          setState(latest.state); setNotice(`Загружен снапшот «${latest.name}».`);
+        }
+        setStorageReady(true);
+      } catch (e) { if (!cancelled) setNotice(e.message + " Откройте окно «Снапшоты», чтобы повторить загрузку."); }
+      finally { if (!cancelled) setBooting(false); }
+    }
+    init();
+    return () => { cancelled = true; };
   }, []);
-
   useEffect(() => {
+    if (!storageReady) return;
     const t = setTimeout(() => {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+      catch { setNotice("Не удалось сохранить план в браузере. Сохраните общий снапшот или экспортируйте JSON."); }
     }, 400);
     return () => clearTimeout(t);
-  }, [state]);
+  }, [state, storageReady]);
+  useEffect(() => {
+    const id = setInterval(() => setCurrWeek(currentWeekIndex()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!booting) goToCurrentWeek(false);
+  }, [booting, currWeek, zoom, goToCurrentWeek]);
 
   const pushHistory = useCallback(() => {
+    setStorageReady(true);
     const snapshot = deepClone(stateRef.current);
     setHistory(h => [...h.slice(-49), snapshot]);
     setFuture([]);
@@ -353,7 +389,7 @@ export default function Dashboard() {
       try {
         const text = await file.text();
         const parsed = JSON.parse(text);
-        if (!parsed.resources || !Array.isArray(parsed.resources)) throw new Error("Нет поля resources");
+        validateState(parsed);
         pushHistory();
         setState(parsed);
       } catch (err) {
@@ -373,7 +409,8 @@ export default function Dashboard() {
     const onKey = (e) => {
       const t = e.target;
       const isEditing = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable;
-      if (isEditing) return;
+      if (e.key === "Escape" && !snapshotsOpen) { setEditingBlock(null); setEditingResource(null); setHelpOpen(false); setConfirmReset(false); setContextMenu(null); setSelectedBlocks([]); return; }
+      if (isEditing || booting || snapshotsOpen || editingBlock || editingResource || helpOpen || confirmReset) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); return; }
       if (selectedBlocks.length > 0) {
@@ -413,12 +450,12 @@ export default function Dashboard() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedBlocks, state, undo, redo]);
+  }, [selectedBlocks, state, undo, redo, booting, snapshotsOpen, editingBlock, editingResource, helpOpen, confirmReset]);
 
   const maxWeeks = useMemo(() => {
     const extra = isDragging ? 8 : 2;
-    return Math.max(30, ...state.resources.map(r => columnEndWeek(r) + extra));
-  }, [state, isDragging]);
+    return Math.max(30, currWeek + 5, ...state.resources.map(r => columnEndWeek(r) + extra));
+  }, [state, isDragging, currWeek]);
   // Реальная длина проекта — максимум, на котором кончается самый длинный ресурс (без технических запасов)
   const projectWeeks = useMemo(
     () => Math.max(0, ...state.resources.map(r => columnEndWeek(r))),
@@ -426,14 +463,13 @@ export default function Dashboard() {
   );
   const totalManWeeks = useMemo(() => state.resources.reduce((s, r) => s + columnManWeeks(r), 0), [state]);
   const totalTasks = useMemo(() => state.resources.reduce((s, r) => s + r.blocks.filter(b => b.kind === "task").length, 0), [state]);
-  const currWeek = currentWeekIndex();
   const timelineHeight = maxWeeks * STEP_PX;
 
   return (
-    <div style={{ fontFamily: "Arial, sans-serif", background: "#F7F7F7", minHeight: "100vh", color: "#1a1a1a" }}
+    <div style={{ fontFamily: "Arial, sans-serif", background: "#F7F7F7", height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden", color: "#1a1a1a" }}
       onClick={() => setContextMenu(null)}>
       <div style={{
-        position: "sticky", top: 0, zIndex: 50, background: "#fff",
+        flexShrink: 0, position: "relative", zIndex: 50, background: "#fff",
         borderBottom: "1px solid #e0e0e0", padding: "14px 24px",
         display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap"
       }}>
@@ -462,15 +498,19 @@ export default function Dashboard() {
         <button onClick={undo} disabled={history.length === 0} style={btnSecondary} title="Ctrl+Z"><RotateCcw size={14} /> Откат</button>
         <button onClick={redo} disabled={future.length === 0} style={btnSecondary} title="Ctrl+Shift+Z"><RotateCw size={14} /> Повтор</button>
         <button onClick={addResource} style={btnPrimary}><Plus size={14} /> Ресурс</button>
+        <button onClick={() => setSnapshotsOpen(true)} style={btnPrimary}><Save size={14} /> Снапшоты</button>
+        <button onClick={() => goToCurrentWeek()} style={btnSecondary} disabled={currWeek < 0}><CalendarDays size={14} /> Текущая неделя</button>
         <button onClick={importJson} style={btnSecondary}><Upload size={14} /> Импорт</button>
         <button onClick={exportJson} style={btnSecondary}><Download size={14} /> Экспорт</button>
         <button onClick={() => setConfirmReset(true)} style={{ ...btnSecondary, color: "#c00" }}><RefreshCw size={14} /> Сброс</button>
         <button onClick={() => setHelpOpen(true)} style={{ ...btnSecondary, padding: "8px 10px" }}><HelpCircle size={14} /></button>
       </div>
 
+      {notice && <div role="status" style={{ padding: "8px 24px", background: "#edf2f7", fontSize: 13, display: "flex", alignItems: "center", gap: 12 }}><span style={{ flex: 1 }}>{notice}</span><button onClick={() => setNotice("")} style={btnSecondary} aria-label="Скрыть уведомление">×</button></div>}
+      {booting && <div role="status" style={{ position: "fixed", inset: 0, zIndex: 190, background: "#f7f7f7ee", display: "grid", placeItems: "center" }}>Загружаем рабочий план…</div>}
       {statsOpen && (
         <div style={{
-          position: "sticky", top: 64, zIndex: 40, background: "#fff",
+          flexShrink: 0, position: "relative", zIndex: 40, background: "#fff",
           margin: "8px 24px 0", padding: "12px 16px", borderRadius: 8,
           border: "1px solid #e0e0e0", fontSize: 13, display: "flex", gap: 28, flexWrap: "wrap"
         }}>
@@ -478,12 +518,14 @@ export default function Dashboard() {
           <div><b>Задач:</b> {totalTasks}</div>
           <div><b>Суммарно ч/н:</b> {totalManWeeks}</div>
           <div><b>Длина проекта:</b> {projectWeeks} нед. (~{Math.ceil(projectWeeks / 4.33)} мес.)</div>
-          <div><b>Текущая неделя:</b> {currWeek >= 0 ? `#${((START_WEEK + currWeek - 1) % 52) + 1}` : "до старта"}</div>
+          <div><b>Текущая неделя:</b> {currWeek >= 0 ? `#${weekLabel(currWeek).num}` : "до старта"}</div>
         </div>
       )}
 
       <div
-        style={{ overflowX: "auto", padding: "20px 0 120px" }}
+        ref={timelineRef}
+        data-testid="timeline"
+        style={{ overflow: "auto", flex: 1, minHeight: 0, padding: "20px 0 120px" }}
         onDragOver={(e) => {
           // Подавляем дефолтный курсор-иконку браузера во время drag блока
           if (window.__dashboardDragging) {
@@ -499,8 +541,7 @@ export default function Dashboard() {
             height: (HEADER_HEIGHT + timelineHeight) * zoom
           }}>
             <div style={{
-              transform: `scale(${zoom})`,
-              transformOrigin: "top left",
+              zoom,
               width: MONTH_COL_WIDTH
             }}>
               <div style={{ height: HEADER_HEIGHT }} />
@@ -516,8 +557,7 @@ export default function Dashboard() {
             height: (HEADER_HEIGHT + timelineHeight) * zoom
           }}>
             <div style={{
-              transform: `scale(${zoom})`,
-              transformOrigin: "top left",
+              zoom,
               width: WEEK_COL_WIDTH
             }}>
               <div style={{ height: HEADER_HEIGHT, background: "#F7F7F7" }} />
@@ -532,7 +572,7 @@ export default function Dashboard() {
           }}>
             <div style={{
               display: "flex", alignItems: "flex-start",
-              transform: `scale(${zoom})`,
+              zoom,
               transformOrigin: "top left"
             }}>
               {state.resources.map((resource) => (
@@ -565,6 +605,11 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {snapshotsOpen && <SnapshotsModal state={state} onClose={() => setSnapshotsOpen(false)} onLoad={snapshot => {
+        pushHistory(); setState(snapshot.state); setSelectedBlocks([]); setSnapshotsOpen(false);
+        setNotice(`Загружен снапшот «${snapshot.name}». Доступен откат к предыдущему плану.`);
+        requestAnimationFrame(() => goToCurrentWeek(false));
+      }} />}
       {contextMenu && (
         <ContextMenuView
           menu={contextMenu}
@@ -594,7 +639,7 @@ export default function Dashboard() {
       {confirmReset && (
         <ModalShell title="Сбросить дашборд?" onClose={() => setConfirmReset(false)}>
           <p style={{ fontFamily: "Arial", fontSize: 14, lineHeight: 1.5 }}>
-            Текущее состояние будет заменено на исходные данные из макета.
+            Текущий план будет очищен. Сохранённые снапшоты останутся доступны.
             Это действие можно будет отменить через Ctrl+Z.
           </p>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
@@ -657,17 +702,18 @@ function WeekScale({ maxWeeks, currWeek, zoom = 1 }) {
         const wl = weekLabel(i);
         const isCurr = i === currWeek;
         return (
-          <div key={i} style={{
+          <div key={i} data-current-week={isCurr ? "true" : undefined} style={{
             height: WEEK_PX,
             boxSizing: "border-box",
             display: "flex", flexDirection: "column", justifyContent: "center",
-            borderLeft: isCurr ? `3px solid ${CURRENT_WEEK_COLOR}` : "1px solid #ddd",
+            borderLeft: "1px solid #ddd",
+            color: isCurr ? "#fffafa" : "inherit",
             borderTop: i === 0 ? "none" : "1px solid rgba(0,0,0,0.06)",
-            paddingLeft: 8, background: isCurr ? "rgba(255,59,48,0.06)" : "transparent"
+            paddingLeft: 8, background: isCurr ? "#b92d27" : "transparent"
           }}>
             <div style={{ fontWeight: 700, fontSize: 14 }}>№ {wl.num}</div>
-            {!isCompact && <div style={{ fontSize: 10, color: "#666" }}>{wl.range}</div>}
-            {isCurr && <div style={{ fontSize: 9, color: CURRENT_WEEK_COLOR, fontWeight: 700 }}>сейчас</div>}
+            {!isCompact && <div style={{ fontSize: 10, color: isCurr ? "#fffafa" : "#666" }}>{wl.range}</div>}
+            {isCurr && <div style={{ fontSize: 9, color: "#fffafa", fontWeight: 700 }}>сейчас</div>}
           </div>
         );
       })}
@@ -765,7 +811,7 @@ function ResourceColumn({
         boxSizing: "border-box",
         background: resource.color, color: "#fff",
         borderRadius: 8, padding: "12px 14px",
-        display: "flex", flexDirection: "column", justifyContent: "space-between", position: "relative"
+        display: "flex", flexDirection: "column", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 12
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
           <div style={{ fontFamily: "Georgia, serif", fontSize: 17, fontWeight: 600, lineHeight: 1.2, cursor: "pointer", flex: 1 }}
@@ -812,6 +858,12 @@ function ResourceColumn({
           borderRadius: 6
         }}
       >
+        {currWeek >= 0 && currWeek < maxWeeks && <div data-testid="current-week-band" style={{
+          position: "absolute", top: currWeek * STEP_PX, left: 0, right: 0, height: WEEK_PX,
+          boxSizing: "border-box", background: "rgba(255,59,48,0.12)",
+          borderTop: `2px solid ${CURRENT_WEEK_COLOR}`, borderBottom: `2px solid ${CURRENT_WEEK_COLOR}`,
+          pointerEvents: "none", zIndex: 6,
+        }} />}
         {/* Drop-indicator */}
         {dropIndicator && dropIndicator.resourceId === resource.id && (
           dropIndicator.onJoint ? (

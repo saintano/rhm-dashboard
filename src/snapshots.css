@@ -1,0 +1,26 @@
+.snapshots { box-sizing: border-box; width: min(700px, calc(100vw - 32px)); max-height: 85vh; padding: 24px; border: 1px solid #d7dce2; border-radius: 10px; background: #fdfdfe; color: #1a1a1a; font: 14px/1.5 Arial, sans-serif; box-shadow: 0 20px 60px #1e3a5f33; }
+.snapshots::backdrop { background: #19263880; }
+.snapshots header, .snapshot-list-heading, .snapshot-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.snapshots h2 { font: 24px Georgia, serif; margin: 0; }
+.snapshots h3 { font-size: 15px; margin: 0; overflow-wrap: anywhere; }
+.snapshot-note { color: #58616a; margin: 12px 0 24px; }
+.snapshots label { display: block; font-weight: 700; margin-bottom: 8px; }
+.snapshot-save { display: flex; flex-wrap: wrap; gap: 8px; }
+.snapshots input { flex: 1 1 230px; min-width: 0; padding: 10px; border: 1px solid #b7c1cb; border-radius: 6px; font: inherit; }
+.snapshots button { border: 1px solid #c4cbd3; border-radius: 6px; background: #fdfdfe; color: #1e3a5f; padding: 8px 12px; font: inherit; cursor: pointer; }
+.snapshots button:hover:not(:disabled) { background: #eaf0f6; }
+.snapshots button.snapshot-primary { background: #1e3a5f; color: #fdfdfe; border-color: #1e3a5f; }
+.snapshots button.snapshot-primary:hover:not(:disabled) { background: #2c507c; }
+button:disabled { opacity: .45; cursor: not-allowed !important; }
+button:focus-visible, input:focus-visible { outline: 2px solid #31689b; outline-offset: 3px; }
+.snapshot-list-heading { margin: 28px 0 8px; }
+.snapshots ul { padding: 0; margin: 0; list-style: none; }
+.snapshots li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid #e0e4e9; }
+.snapshots li strong { overflow-wrap: anywhere; }
+.snapshots li time { display: block; font-size: 12px; color: #58616a; margin-top: 4px; }
+.snapshots li button { flex-shrink: 0; }
+.snapshot-error { padding: 12px; color: #9c2626; background: #fff0ef; border: 1px solid #ecb4b0; border-radius: 6px; }
+.snapshot-success { color: #25603e; }
+.snapshot-confirm { margin-top: 24px; padding-top: 18px; border-top: 1px solid #c4cbd3; }
+.snapshot-actions { justify-content: flex-end; }
+@media (max-width: 540px) { .snapshots { padding: 18px; } .snapshot-save button { width: 100%; } }

@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+*.log
+.vite
+.vercel
+.env*
+
+.local/
+.env*
+.vercel/
+test-results/
+playwright-report/
