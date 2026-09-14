@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react(), {
     name: 'local-snapshots',
     configureServer(server) {
-      const handler = createHandler(localStore(process.env.RHM_LOCAL_SNAPSHOTS_DIR || '.local/snapshots'));
+      const handler = createHandler(localStore(process.env.RHM_LOCAL_SNAPSHOTS_DIR || 'snapshots'));
       server.middlewares.use((req, res, next) => {
         if (new URL(req.url, 'http://localhost').pathname === '/api/snapshots') return handler(req, res);
         next();

@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import SnapshotsModal from "./SnapshotsModal";
 import { snapshotRequest } from "./snapshots";
-import { validateState, currentWeekIndex, isoWeek } from "../shared/dashboard.js";
+import { snapshotFilename } from "../shared/snapshots.js";
+import { validateState, currentWeekIndex, isoWeek, weekMonth, planTailMove, reorderBlock, placeBlock } from "../shared/dashboard.js";
 import { Save, CalendarDays, Plus, Trash2, Download, Upload, HelpCircle, ChevronDown, ChevronUp, X, RotateCcw, RotateCw, MoreVertical, RefreshCw } from "lucide-react";
 
 // ===== Версия данных =====
 // Ключ рабочих данных сохраняется между релизами.
 const APP_VERSION = 4;
 const STORAGE_KEY = `dashboard-state-v${APP_VERSION}`;
+const FILE_STORAGE_KEY = "dashboard-active-file-v1";
 
 // ===== Константы =====
 const WEEK_PX = 60;         // высота одной недели в сетке (сплошная, без внешнего зазора)
@@ -63,6 +65,13 @@ export default function Dashboard() {
     try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return validateState(JSON.parse(raw)); } catch {}
     return INITIAL_STATE;
   });
+  const [currentFile, setCurrentFile] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(FILE_STORAGE_KEY)) || null; } catch { return null; }
+  });
+  const currentFileRef = useRef(currentFile);
+  currentFileRef.current = currentFile;
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [compactHeaders, setCompactHeaders] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [notice, setNotice] = useState("");
@@ -73,7 +82,7 @@ export default function Dashboard() {
     const row = timelineRef.current?.querySelector('[data-current-week="true"]');
     if (!row) return;
     const scroller = timelineRef.current;
-    scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 150), behavior: smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant' });
+    scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 80), behavior: smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant' });
   }, []);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
@@ -111,16 +120,16 @@ export default function Dashboard() {
     let cancelled = false;
     async function init() {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) { validateState(JSON.parse(raw)); setStorageReady(true); setBooting(false); return; }
-      } catch { setNotice("Не удалось прочитать локальный план. Откройте сохранённый снапшот."); setBooting(false); return; }
-      try {
         const { snapshots } = await snapshotRequest();
         if (cancelled) return;
         if (snapshots.length) {
           const latest = await snapshotRequest(snapshots[0].id);
           if (cancelled) return;
-          setState(latest.state); setNotice(`Загружен снапшот «${latest.name}».`);
+          // Keep the previous browser draft available to undo after opening the latest file.
+          if (JSON.stringify(stateRef.current) !== JSON.stringify(latest.state)) {
+            setHistory([{ state: deepClone(stateRef.current), file: currentFileRef.current }]);
+          }
+          setState(latest.state); setCurrentFile({ id: latest.id, name: latest.name });
         }
         setStorageReady(true);
       } catch (e) { if (!cancelled) setNotice(e.message + " Откройте окно «Снапшоты», чтобы повторить загрузку."); }
@@ -132,11 +141,12 @@ export default function Dashboard() {
   useEffect(() => {
     if (!storageReady) return;
     const t = setTimeout(() => {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-      catch { setNotice("Не удалось сохранить план в браузере. Сохраните общий снапшот или экспортируйте JSON."); }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); localStorage.setItem(FILE_STORAGE_KEY, JSON.stringify(currentFile)); }
+      catch { setNotice("Не удалось сохранить черновик в браузере. Сохраните снапшот."); }
     }, 400);
     return () => clearTimeout(t);
-  }, [state, storageReady]);
+  }, [state, currentFile, storageReady]);
+  useEffect(() => { document.title = currentFile?.name || "RHM Market Gantt"; }, [currentFile?.name]);
   useEffect(() => {
     const id = setInterval(() => setCurrWeek(currentWeekIndex()), 60000);
     return () => clearInterval(id);
@@ -147,7 +157,7 @@ export default function Dashboard() {
 
   const pushHistory = useCallback(() => {
     setStorageReady(true);
-    const snapshot = deepClone(stateRef.current);
+    const snapshot = { state: deepClone(stateRef.current), file: currentFileRef.current };
     setHistory(h => [...h.slice(-49), snapshot]);
     setFuture([]);
   }, []);
@@ -155,19 +165,19 @@ export default function Dashboard() {
   const undo = useCallback(() => {
     if (history.length === 0) return;
     const prev = history[history.length - 1];
-    const current = deepClone(stateRef.current);
+    const current = { state: deepClone(stateRef.current), file: currentFileRef.current };
     setFuture(f => [current, ...f.slice(0, 49)]);
     setHistory(h => h.slice(0, -1));
-    setState(prev);
+    setState(prev.state); setCurrentFile(prev.file); setSelectedBlocks([]);
   }, [history]);
 
   const redo = useCallback(() => {
     if (future.length === 0) return;
     const next = future[0];
-    const current = deepClone(stateRef.current);
+    const current = { state: deepClone(stateRef.current), file: currentFileRef.current };
     setHistory(h => [...h.slice(-49), current]);
     setFuture(f => f.slice(1));
-    setState(next);
+    setState(next.state); setCurrentFile(next.file); setSelectedBlocks([]);
   }, [future]);
   const update = useCallback((mutator) => {
     pushHistory();
@@ -222,27 +232,10 @@ export default function Dashboard() {
   const moveBlockBy = (rId, bId, deltaWeeks) => update(s => {
     const r = s.resources.find(x => x.id === rId);
     if (!r) return;
-    const b = r.blocks.find(x => x.id === bId);
-    if (!b) return;
-    const newStart = Math.max(0, b.weekStart + deltaWeeks);
-    if (newStart === b.weekStart) return;
-
-    const draggedCenter = newStart + b.weeks / 2;
-    const candidates = r.blocks.filter(x => x.id !== bId);
-    const swapTarget = candidates.find(
-      x => draggedCenter >= x.weekStart && draggedCenter < x.weekStart + x.weeks
-    );
-
-    if (swapTarget) {
-      // Swap: блок встаёт на начало соседа, сосед — сразу за новым положением блока
-      const oldStart = swapTarget.weekStart;
-      b.weekStart = oldStart;
-      swapTarget.weekStart = oldStart + b.weeks;
-      pushDownCollisions(r, swapTarget);
-    } else {
-      b.weekStart = newStart;
-      pushDownCollisions(r, b);
-    }
+    const ordered = [...r.blocks].sort((a,b) => a.weekStart-b.weekStart);
+    const index = ordered.findIndex(b => b.id === bId);
+    const neighbor = ordered[index + deltaWeeks];
+    if (index >= 0 && neighbor) reorderBlock(r, bId, neighbor.id, deltaWeeks > 0 ? "after" : "before");
   });
 
   // Перемещение с swap при наезде на соседа
@@ -287,47 +280,8 @@ export default function Dashboard() {
     }
   }
 
-  const moveBlockTo = (srcId, bId, dstId, targetWeek, forceExact = false) => update(s => {
-    const src = s.resources.find(x => x.id === srcId);
-    const dst = s.resources.find(x => x.id === dstId);
-    if (!src || !dst) return;
-
-    const origIdx = src.blocks.findIndex(b => b.id === bId);
-    if (origIdx < 0) return;
-    const block = src.blocks[origIdx];
-
-    const week = Math.max(0, targetWeek);
-
-    // Удаляем блок из источника — остальные блоки остаются на своих абсолютных позициях
-    src.blocks.splice(origIdx, 1);
-
-    // Если forceExact — ставим на точную позицию без swap (используется при drop в стык).
-    // Иначе ищем блок, на который наезжаем центром, и делаем swap.
-    let swapTarget = null;
-    if (!forceExact) {
-      const candidates = dst.blocks;
-      const draggedCenter = week + block.weeks / 2;
-      swapTarget = candidates.find(
-        b => draggedCenter >= b.weekStart && draggedCenter < b.weekStart + b.weeks
-      );
-    }
-
-    if (swapTarget) {
-      // Swap — блоки меняются местами: moved встаёт на начало swapTarget, swapTarget уходит на конец moved
-      const oldStart = swapTarget.weekStart;
-      block.weekStart = oldStart;
-      swapTarget.weekStart = oldStart + block.weeks;
-      dst.blocks.push(block);
-      pushDownCollisions(dst, swapTarget);
-    } else {
-      // Просто ставим в указанную позицию; если пересекается с соседями — они сдвинутся вниз
-      block.weekStart = week;
-      dst.blocks.push(block);
-      pushDownCollisions(dst, block);
-    }
-
-    dst.blocks.sort((a, b) => a.weekStart - b.weekStart);
-    if (src !== dst) src.blocks.sort((a, b) => a.weekStart - b.weekStart);
+  const moveBlockTo = (srcId, bId, dstId, intent) => update(s => {
+    placeBlock(s.resources, srcId, bId, dstId, intent);
   });
 
   const addResource = () => update(s => {
@@ -365,7 +319,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `rhm-dashboard-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = currentFile?.name || snapshotFilename();
       a.rel = "noopener";
       a.target = "_self";
       document.body.appendChild(a);
@@ -391,7 +345,8 @@ export default function Dashboard() {
         const parsed = JSON.parse(text);
         validateState(parsed);
         pushHistory();
-        setState(parsed);
+        const { _snapshot, ...importedState } = parsed;
+        setState(importedState); setCurrentFile({ id: null, name: file.name }); setSelectedBlocks([]);
       } catch (err) {
         alert("Не удалось импортировать: " + err.message);
       }
@@ -401,7 +356,7 @@ export default function Dashboard() {
 
   const resetToDefault = () => {
     pushHistory();
-    setState(deepClone(INITIAL_STATE));
+    setState(deepClone(INITIAL_STATE)); setCurrentFile(null);
     setConfirmReset(false);
   };
 
@@ -409,7 +364,7 @@ export default function Dashboard() {
     const onKey = (e) => {
       const t = e.target;
       const isEditing = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable;
-      if (e.key === "Escape" && !snapshotsOpen) { setEditingBlock(null); setEditingResource(null); setHelpOpen(false); setConfirmReset(false); setContextMenu(null); setSelectedBlocks([]); return; }
+      if (e.key === "Escape" && !snapshotsOpen) { setFileMenuOpen(false); setEditingBlock(null); setEditingResource(null); setHelpOpen(false); setConfirmReset(false); setContextMenu(null); setSelectedBlocks([]); return; }
       if (isEditing || booting || snapshotsOpen || editingBlock || editingResource || helpOpen || confirmReset) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); return; }
@@ -426,7 +381,22 @@ export default function Dashboard() {
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           e.preventDefault();
           const delta = e.key === "ArrowDown" ? 1 : -1;
-          if (e.shiftKey) {
+          if (e.altKey) {
+            const moves = planTailMove(state.resources, selectedBlocks, delta);
+            if (moves === null) {
+              setNotice(delta < 0 ? "Сдвиг вверх невозможен: выше другой блок или начало шкалы." : "Достигнут конец допустимого периода.");
+              return;
+            }
+            if (moves.length) {
+              update(s => {
+                for (const move of moves) {
+                  const block = s.resources.find(r => r.id === move.resourceId)?.blocks.find(b => b.id === move.blockId);
+                  if (block) block.weekStart = move.weekStart;
+                }
+              });
+              setNotice("");
+            }
+          } else if (e.shiftKey) {
             // Shift+стрелки — ресайз всех выбранных
             for (const sel of selectedBlocks) {
               const r = state.resources.find(rr => rr.id === sel.resourceId);
@@ -467,13 +437,13 @@ export default function Dashboard() {
 
   return (
     <div style={{ fontFamily: "Arial, sans-serif", background: "#F7F7F7", height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden", color: "#1a1a1a" }}
-      onClick={() => setContextMenu(null)}>
+      onClick={() => { setContextMenu(null); setFileMenuOpen(false); }}>
       <div style={{
         flexShrink: 0, position: "relative", zIndex: 50, background: "#fff",
         borderBottom: "1px solid #e0e0e0", padding: "14px 24px",
         display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap"
       }}>
-        <h1 style={{ fontFamily: "Georgia, serif", fontSize: 24, margin: 0, fontWeight: 400 }}>RHM MP 1.0 Платформа</h1>
+        <h1 title={currentFile?.name || "Новый план"} style={{ fontFamily: "Georgia, serif", fontSize: 20, margin: 0, fontWeight: 400, maxWidth: 440, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentFile?.name || "Новый план"}</h1>
         <button onClick={() => setStatsOpen(v => !v)} style={btnSecondary}>
           {statsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Статистика
         </button>
@@ -495,13 +465,18 @@ export default function Dashboard() {
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <button onClick={undo} disabled={history.length === 0} style={btnSecondary} title="Ctrl+Z"><RotateCcw size={14} /> Откат</button>
-        <button onClick={redo} disabled={future.length === 0} style={btnSecondary} title="Ctrl+Shift+Z"><RotateCw size={14} /> Повтор</button>
+        <button onClick={undo} disabled={history.length === 0} style={{ ...btnSecondary, padding: "8px" }} aria-label="Откат" title="Откат · Ctrl+Z"><RotateCcw size={16} /></button>
+        <button onClick={redo} disabled={future.length === 0} style={{ ...btnSecondary, padding: "8px" }} aria-label="Повтор" title="Повтор · Ctrl+Shift+Z"><RotateCw size={16} /></button>
         <button onClick={addResource} style={btnPrimary}><Plus size={14} /> Ресурс</button>
-        <button onClick={() => setSnapshotsOpen(true)} style={btnPrimary}><Save size={14} /> Снапшоты</button>
+        <div style={{ position: "relative", display: "inline-flex" }} onClick={e => e.stopPropagation()}>
+          <button onClick={() => { setSnapshotsOpen(true); setFileMenuOpen(false); }} style={{ ...btnPrimary, borderRadius: "6px 0 0 6px" }}><Save size={14} /> Снапшоты</button>
+          <button onClick={() => setFileMenuOpen(v => !v)} style={{ ...btnPrimary, borderRadius: "0 6px 6px 0", padding: "8px", borderLeft: "1px solid #ffffff40" }} aria-label="Файловые действия" title="Файловые действия" aria-haspopup="menu" aria-expanded={fileMenuOpen}><MoreVertical size={16} /></button>
+          {fileMenuOpen && <div role="menu" aria-label="Файловые действия" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 195, background: "#fdfdfe", border: "1px solid #dce1e6", padding: 5, borderRadius: 6, boxShadow: "0 8px 24px #1e3a5f26" }}>
+            <button role="menuitem" onClick={() => { setFileMenuOpen(false); exportJson(); }} style={{ ...menuItem, display: "flex", alignItems: "center", gap: 8 }}><Download size={14} /> Экспорт в файл</button>
+            <button role="menuitem" onClick={() => { setFileMenuOpen(false); importJson(); }} style={{ ...menuItem, display: "flex", alignItems: "center", gap: 8 }}><Upload size={14} /> Импорт из файла</button>
+          </div>}
+        </div>
         <button onClick={() => goToCurrentWeek()} style={btnSecondary} disabled={currWeek < 0}><CalendarDays size={14} /> Текущая неделя</button>
-        <button onClick={importJson} style={btnSecondary}><Upload size={14} /> Импорт</button>
-        <button onClick={exportJson} style={btnSecondary}><Download size={14} /> Экспорт</button>
         <button onClick={() => setConfirmReset(true)} style={{ ...btnSecondary, color: "#c00" }}><RefreshCw size={14} /> Сброс</button>
         <button onClick={() => setHelpOpen(true)} style={{ ...btnSecondary, padding: "8px 10px" }}><HelpCircle size={14} /></button>
       </div>
@@ -525,6 +500,7 @@ export default function Dashboard() {
       <div
         ref={timelineRef}
         data-testid="timeline"
+        onScroll={e => setCompactHeaders(e.currentTarget.scrollTop > 16)}
         style={{ overflow: "auto", flex: 1, minHeight: 0, padding: "20px 0 120px" }}
         onDragOver={(e) => {
           // Подавляем дефолтный курсор-иконку браузера во время drag блока
@@ -560,7 +536,19 @@ export default function Dashboard() {
               zoom,
               width: WEEK_COL_WIDTH
             }}>
-              <div style={{ height: HEADER_HEIGHT, background: "#F7F7F7" }} />
+              <div data-testid="current-week-header" style={{
+                position: "sticky", top: 0, zIndex: 30,
+                height: compactHeaders ? 36 / zoom : HEADER_HEIGHT - 10,
+                marginBottom: compactHeaders ? HEADER_HEIGHT - 36 / zoom : 10,
+              }}>
+                <button onClick={() => goToCurrentWeek()} disabled={currWeek < 0}
+                  aria-label={currWeek >= 0 ? `Перейти к текущей неделе № ${weekLabel(currWeek).num}` : "До старта проекта"}
+                  title={currWeek >= 0 ? `Текущая неделя: ${weekLabel(currWeek).range}` : "До старта проекта"}
+                  style={{ width: "100%", height: "100%", boxSizing: "border-box", background: "#b92d27", color: "#fffafa", border: 0, borderRadius: 5, padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "Arial", lineHeight: 1.15 }}>
+                  <span style={{ fontSize: compactHeaders ? 14 / zoom : 16, fontWeight: 700 }}>{currWeek >= 0 ? `№ ${weekLabel(currWeek).num}` : "—"}</span>
+                  <span style={{ fontSize: compactHeaders ? 9 / zoom : 11 }}>сейчас</span>
+                </button>
+              </div>
               <WeekScale maxWeeks={maxWeeks} currWeek={currWeek} zoom={zoom} />
             </div>
           </div>
@@ -579,6 +567,7 @@ export default function Dashboard() {
                 <ResourceColumn
                   key={resource.id}
                   resource={resource}
+                  compactHeader={compactHeaders}
                   maxWeeks={maxWeeks}
                   timelineHeight={timelineHeight}
                   currWeek={currWeek}
@@ -605,11 +594,17 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {snapshotsOpen && <SnapshotsModal state={state} onClose={() => setSnapshotsOpen(false)} onLoad={snapshot => {
-        pushHistory(); setState(snapshot.state); setSelectedBlocks([]); setSnapshotsOpen(false);
-        setNotice(`Загружен снапшот «${snapshot.name}». Доступен откат к предыдущему плану.`);
-        requestAnimationFrame(() => goToCurrentWeek(false));
-      }} />}
+      {snapshotsOpen && <SnapshotsModal state={state} currentFile={currentFile} onClose={() => setSnapshotsOpen(false)}
+        onSaved={file => setCurrentFile({ id: file.id, name: file.name })}
+        onFileChange={file => {
+          const renameEntry = entry => entry.file?.id === file.id ? { ...entry, file: { id: file.id, name: file.name } } : entry;
+          setCurrentFile(prev => prev?.id === file.id ? { id: file.id, name: file.name } : prev);
+          setHistory(items => items.map(renameEntry)); setFuture(items => items.map(renameEntry));
+        }}
+        onLoad={snapshot => {
+          pushHistory(); setState(snapshot.state); setCurrentFile({ id: snapshot.id, name: snapshot.name }); setSelectedBlocks([]); setSnapshotsOpen(false); setNotice("");
+          requestAnimationFrame(() => goToCurrentWeek(false));
+        }} />}
       {contextMenu && (
         <ContextMenuView
           menu={contextMenu}
@@ -658,7 +653,7 @@ function MonthRail({ maxWeeks }) {
   let prevM = -1, prevY = -1, start = 0;
   for (let i = 0; i < maxWeeks; i++) {
     const d = weekToDate(i);
-    const m = d.getMonth(), y = d.getFullYear();
+    const { month: m, year: y } = weekMonth(d);
     if (m !== prevM || y !== prevY) {
       if (i > 0) monthRanges.push({ start, end: i, m: prevM, y: prevY });
       prevM = m; prevY = y; start = i;
@@ -673,7 +668,7 @@ function MonthRail({ maxWeeks }) {
         const height = (mr.end - mr.start) * STEP_PX - 4;
         const isEven = idx % 2 === 0;
         return (
-          <div key={idx} style={{
+          <div key={idx} data-month={`${mr.y}-${String(mr.m + 1).padStart(2, "0")}`} data-start-week={mr.start} style={{
             position: "absolute", top, left: 0, width: 66, height,
             boxSizing: "border-box",
             background: isEven ? "#1E3A5F" : "#3A4A5F",
@@ -723,7 +718,7 @@ function WeekScale({ maxWeeks, currWeek, zoom = 1 }) {
 
 // ===== Колонка =====
 function ResourceColumn({
-  resource, maxWeeks, timelineHeight, currWeek,
+  resource, maxWeeks, timelineHeight, currWeek, compactHeader = false,
   selectedBlocks, toggleSelection, setEditingBlock, setEditingResource,
   setContextMenu, resizeBlock, moveBlockTo, addBlock, removeResource,
   dropIndicator, setDropIndicator, isDragging, setIsDragging, zoom = 1
@@ -733,100 +728,68 @@ function ResourceColumn({
   const [menuOpen, setMenuOpen] = useState(false);
   const columnRef = useRef(null);
 
+  const getDropIntent = (e) => {
+    const dragging = window.__dashboardDragging;
+    if (!dragging) return null;
+    const rect = columnRef.current.getBoundingClientRect();
+    const cursorWeek = (e.clientY - rect.top) / zoom / STEP_PX;
+    const weekStart = Math.max(0, Math.round(cursorWeek - dragging.grabOffsetWeeks));
+    const candidates = resource.blocks.filter(b => b.id !== dragging.blockId);
+    const target = candidates.find(b => cursorWeek >= b.weekStart && cursorWeek < b.weekStart + b.weeks);
+    const side = target && cursorWeek >= target.weekStart + target.weeks / 2 ? "after" : "before";
+    const intent = { weekStart, targetId: target?.id, side };
+    let previewWeek = target ? target.weekStart + (side === "after" ? target.weeks : 0) : weekStart;
+    if (target && dragging.resourceId === resource.id) {
+      const preview = deepClone(resource);
+      reorderBlock(preview, dragging.blockId, target.id, side);
+      previewWeek = preview.blocks.find(b => b.id === dragging.blockId).weekStart;
+    }
+    return { ...intent, resourceId: resource.id, weekStart: target ? previewWeek : weekStart,
+      weeks: dragging.weeks, onJoint: false };
+  };
   const handleDragOver = (e) => {
     if (!window.__dashboardDragging) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    const rect = columnRef.current.getBoundingClientRect();
-    const yCursor = (e.clientY - rect.top) / zoom;
-    const dragging = window.__dashboardDragging;
-    const grabOffset = dragging.grabOffsetWeeks || 0;
-    const y = yCursor - grabOffset * STEP_PX;
-    const weekFloat = y / STEP_PX;
-
-    // Логика: ищем, в какой блок попал курсор (по дробной позиции).
-    // Если курсор в верхней половине блока — вставляем ПЕРЕД ним.
-    // Если в нижней — вставляем ПОСЛЕ.
-    // Если попали между блоками (в пустое пространство) — ставим в эту пустоту.
-    const candidates = resource.blocks.filter(b => b.id !== dragging.blockId);
-    let snapWeek = Math.max(0, Math.round(weekFloat));
-    let onJoint = false;
-    let jointWeek = null;
-
-    // Ищем блок, внутрь которого попал курсор
-    const insideBlock = candidates.find(
-      b => weekFloat >= b.weekStart && weekFloat < b.weekStart + b.weeks
-    );
-
-    if (insideBlock) {
-      const center = insideBlock.weekStart + insideBlock.weeks / 2;
-      if (weekFloat < center) {
-        // Верхняя половина — вставить перед insideBlock
-        snapWeek = Math.max(0, insideBlock.weekStart - dragging.weeks);
-        jointWeek = insideBlock.weekStart;
-      } else {
-        // Нижняя половина — вставить после insideBlock
-        snapWeek = insideBlock.weekStart + insideBlock.weeks;
-        jointWeek = insideBlock.weekStart + insideBlock.weeks;
-      }
-      onJoint = true;
-    }
-
-    setDropIndicator({ resourceId: resource.id, weekStart: snapWeek, weeks: dragging.weeks, onJoint, jointWeek });
+    setDropIndicator(getDropIntent(e));
   };
-
   const handleDragLeave = (e) => {
     if (e.currentTarget.contains(e.relatedTarget)) return;
     if (dropIndicator?.resourceId === resource.id) setDropIndicator(null);
   };
-
   const handleDrop = (e) => {
     e.preventDefault();
     const dragging = window.__dashboardDragging;
-    const indicator = dropIndicator;
+    const intent = getDropIntent(e);
     setDropIndicator(null);
-    if (!dragging) return;
-    // Если есть активный индикатор для этой колонки — используем его позицию, и если он на стыке —
-    // просим moveBlockTo вставить точно туда без swap-логики
-    let targetWeek;
-    let forceExact = false;
-    if (indicator && indicator.resourceId === resource.id) {
-      targetWeek = indicator.weekStart;
-      forceExact = true; // индикатор всегда определяет точную позицию вставки
-    } else {
-      const rect = columnRef.current.getBoundingClientRect();
-      const yCursor = (e.clientY - rect.top) / zoom;
-      const grabOffset = dragging.grabOffsetWeeks || 0;
-      const y = yCursor - grabOffset * STEP_PX;
-      targetWeek = Math.max(0, Math.round(y / STEP_PX));
-    }
-    moveBlockTo(dragging.resourceId, dragging.blockId, resource.id, targetWeek, forceExact);
+    if (!dragging || !intent) return;
+    moveBlockTo(dragging.resourceId, dragging.blockId, resource.id, intent);
     window.__dashboardDragging = null;
   };
 
   return (
     <div style={{ width: COL_WIDTH, flexShrink: 0, marginRight: 14, position: "relative" }}>
       <div style={{
-        height: HEADER_HEIGHT - 10, marginBottom: 10,
+        height: compactHeader ? 36 / zoom : HEADER_HEIGHT - 10, marginBottom: compactHeader ? HEADER_HEIGHT - 36 / zoom : 10,
         boxSizing: "border-box",
         background: resource.color, color: "#fff",
-        borderRadius: 8, padding: "12px 14px",
-        display: "flex", flexDirection: "column", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 12
+        borderRadius: compactHeader ? 5 : 8, padding: compactHeader ? `${7 / zoom}px ${10 / zoom}px` : "12px 14px",
+        display: "flex", flexDirection: "column", justifyContent: compactHeader ? "center" : "space-between", position: "sticky", top: 0, zIndex: 12
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-          <div style={{ fontFamily: "Georgia, serif", fontSize: 17, fontWeight: 600, lineHeight: 1.2, cursor: "pointer", flex: 1 }}
+          <div title={resource.name} style={{ fontFamily: "Georgia, serif", fontSize: compactHeader ? Math.max(17, 12 / zoom) : 17, fontWeight: 600, lineHeight: 1.2, cursor: "pointer", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: compactHeader ? "nowrap" : "normal" }}
             onDoubleClick={() => setEditingResource(resource.id)}>
             {resource.name}
           </div>
-          <button onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }} style={iconBtnOnDark} title="Меню ресурса">
+          {!compactHeader && <button onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }} style={iconBtnOnDark} title="Меню ресурса">
             <MoreVertical size={14} />
-          </button>
+          </button>}
         </div>
-        <div style={{ fontSize: 11, opacity: 0.9, fontFamily: "Arial" }}>
+        {!compactHeader && <div style={{ fontSize: 11, opacity: 0.9, fontFamily: "Arial" }}>
           {manWeeks} ч/н · {endWeek} нед.
-        </div>
+        </div>}
 
-        {menuOpen && (
+        {menuOpen && !compactHeader && (
           <div style={{
             position: "absolute", top: "100%", right: 0, marginTop: 4, zIndex: 30,
             background: "#fff", color: "#000", borderRadius: 6,
@@ -885,7 +848,7 @@ function ResourceColumn({
               height: dropIndicator.weeks * STEP_PX - GAP_PX,
               border: "2px dashed #1E3A5F",
               background: "rgba(30,58,95,0.08)",
-              borderRadius: 6, pointerEvents: "none", zIndex: 1
+              borderRadius: 6, pointerEvents: "none", zIndex: 7
             }} />
           )
         )}
@@ -968,13 +931,12 @@ function Block({ block, resource, isSelected, onSelect, onEdit, onContextMenu, o
 
   const onDragStart = (e) => {
     e.stopPropagation();
-    // Упрощённая модель: во время drag верхняя граница блока следует за курсором.
-    // Пользователю не нужно считать grab-offset — визуальный индикатор покажет результат.
+    // Keep the original grab point so starting a drag does not jump the block.
     window.__dashboardDragging = {
       resourceId: resource.id,
       blockId: block.id,
       weeks: block.weeks,
-      grabOffsetWeeks: 0
+      grabOffsetWeeks: (e.clientY - e.currentTarget.getBoundingClientRect().top) / zoom / STEP_PX
     };
     // Используем text/plain с пустой строкой — Chrome иначе показывает глобус URL
     e.dataTransfer.setData("text/plain", "");
@@ -1301,7 +1263,8 @@ function HelpModal({ onClose }) {
         <ul style={{ marginTop: 4, paddingLeft: 20 }}>
           <li><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> — откат / повтор</li>
           <li><kbd>Delete</kbd> — удалить выделенный блок</li>
-          <li><kbd>↑</kbd> / <kbd>↓</kbd> — сдвиг блока на 1 неделю</li>
+          <li><kbd>↑</kbd> / <kbd>↓</kbd> — поменять выбранный блок местами с соседним</li>
+          <li><kbd>Alt+↑</kbd> / <kbd>Alt+↓</kbd> (⌥ на Mac) — сдвинуть выбранный блок и все ниже в том же ресурсе на 1 неделю, сохраняя промежутки. При нескольких выбранных — начиная с самого верхнего в каждом ресурсе. Сдвиг вверх ограничен предыдущим блоком и началом шкалы.</li>
           <li><kbd>Shift+↑</kbd> / <kbd>Shift+↓</kbd> — изменение длительности на ±1 неделю</li>
           <li><kbd>?</kbd> — справка, <kbd>Esc</kbd> — отмена / закрыть</li>
         </ul>
@@ -1314,7 +1277,8 @@ function HelpModal({ onClose }) {
         <p><b>Сохранение</b></p>
         <ul style={{ marginTop: 4, paddingLeft: 20 }}>
           <li>Автосохранение в браузере после каждого изменения</li>
-          <li>«Экспорт» сохраняет JSON-файл, «Импорт» загружает</li>
+          <li>«Снапшоты»: файлы истории, сохранение, комментарии и загрузка с подтверждением.</li>
+          <li>Меню ⋮ рядом со «Снапшотами»: экспорт и импорт JSON.</li>
           <li>«Сброс» восстанавливает исходное состояние из макета</li>
         </ul>
       </div>
